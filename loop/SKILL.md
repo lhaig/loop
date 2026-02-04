@@ -59,6 +59,7 @@ All state lives in a `.loop/` folder in the project root:
   tasks.md      # Task list with status and dependencies
   progress.md   # Append-only execution log
   config.md     # Project config and thresholds
+  context-full  # Signal file (created by PreCompact hook when context is filling)
 ```
 
 ### Config File (.loop/config.md)
@@ -69,6 +70,7 @@ All state lives in a `.loop/` folder in the project root:
 ## Session Limits
 max_tasks_per_session: 15    # Pause and recommend restart after N tasks
 warn_at_tasks: 12            # Show warning at this count
+auto_restart: true           # Automatically restart when context is filling
 
 ## Project
 name: [Project Name]
@@ -88,6 +90,49 @@ default_subagent: general-purpose
 ```
 
 The orchestrator reads this config at the start of each session and tracks tasks completed in the current session.
+
+### Context Monitoring (PreCompact Hook)
+
+Loop can automatically detect when context is filling up and restart with a fresh session. This uses Claude Code's PreCompact hook, which fires just before automatic context compaction.
+
+**Setup:** Add this to your `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "touch .loop/context-full && echo 'Context full signal created'"
+      }
+    ]
+  }
+}
+```
+
+Or create `.claude/settings.local.json` for project-specific hooks:
+
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "if [ -d .loop ]; then touch .loop/context-full; fi"
+      }
+    ]
+  }
+}
+```
+
+**How it works:**
+1. Claude Code triggers `PreCompact` hook when context window is nearly full
+2. Hook creates `.loop/context-full` signal file
+3. Before each task, orchestrator checks for this signal
+4. If signal exists: saves state, reports status, and instructs to restart
+5. On restart: signal file is cleaned up, execution continues seamlessly
+
+**Note:** The hook only creates the signal when a `.loop/` directory exists, so it won't affect non-loop sessions.
 
 ---
 
@@ -458,19 +503,27 @@ Start with: "continue loop", "run the loop", or just "loop"
 
 ### Step 0: Initialize Session Tracking (Orchestrator)
 
-At the START of each session, initialize:
+At the START of each session:
+
+**Initialize counters:**
 ```
 session_tasks_completed = 0
 ```
 
-Read config:
+**Clean up context signal from previous session:**
+```bash
+rm -f .loop/context-full
+```
+
+**Read config:**
 ```bash
 cat .loop/config.md
 ```
 
-Extract limits:
+**Extract settings:**
 - `max_tasks_per_session` (default: 15)
 - `warn_at_tasks` (default: 12)
+- `auto_restart` (default: true)
 
 ### Step 1: Read State (Orchestrator)
 
@@ -506,6 +559,41 @@ Before spawning the subagent, gather everything it needs:
 3. **Recent learnings** from last 2-3 task entries in progress.md
 4. **Relevant file paths** the task will likely touch
 5. **Project conventions** (from CLAUDE.md, AGENTS.md if they exist)
+
+### Step 3.5: Check Context Signal (Orchestrator)
+
+**Before spawning each subagent, check for context-full signal:**
+
+```bash
+if [ -f .loop/context-full ]; then echo "CONTEXT_FULL"; fi
+```
+
+**If signal exists and auto_restart is enabled:**
+
+```
+CONTEXT FULL - Automatic restart needed
+
+Current session has accumulated significant context. The PreCompact hook
+detected the context window is nearly full.
+
+Progress saved:
+- Tasks completed this session: [N]
+- Overall progress: [done]/[total] ([percent]%)
+- Next task ready: Task [M]: [description]
+
+To continue with fresh context, start a new conversation and say:
+  "continue loop"
+
+All state is preserved in .loop/ files. The loop will resume exactly
+where it left off.
+```
+
+Then STOP execution (do not spawn the subagent).
+
+**If signal exists but auto_restart is disabled:**
+- Log warning: "Context filling up, consider restarting soon"
+- Remove signal file: `rm .loop/context-full`
+- Continue execution
 
 ### Step 4: Spawn Subagent (Orchestrator)
 
@@ -600,6 +688,28 @@ After successful task completion:
 session_tasks_completed += 1
 ```
 
+**Check context signal first (highest priority):**
+
+```bash
+if [ -f .loop/context-full ]; then echo "CONTEXT_FULL"; fi
+```
+
+If signal exists and auto_restart is enabled:
+```
+CONTEXT FULL - Automatic restart needed
+
+Completed Task [N] successfully, but context window is nearly full.
+
+Progress saved:
+- Tasks completed this session: [count]
+- Overall progress: [done]/[total] ([percent]%)
+- Next task ready: Task [M]: [description]
+
+To continue with fresh context, start a new conversation and say:
+  "continue loop"
+```
+Then STOP execution.
+
 **Check session limits:**
 
 ```
@@ -625,6 +735,7 @@ elif session_tasks_completed >= warn_at_tasks:
 - User interrupts (Ctrl+C or says "loop pause")
 - Subagent reports BLOCKED
 - **Session task limit reached**
+- **Context full signal detected** (auto-restart)
 
 ---
 
@@ -665,6 +776,97 @@ Use this when you want to start fresh on a new set of features without the bagga
 
 ---
 
+## Mode 6: Hooks Setup
+
+Start with: "loop hooks"
+
+This mode checks if the PreCompact hook is configured and offers to set it up.
+
+### Step 1: Check Current Hook Configuration
+
+```bash
+cat ~/.claude/settings.json 2>/dev/null | grep -A5 "PreCompact" || echo "NOT_FOUND"
+cat .claude/settings.local.json 2>/dev/null | grep -A5 "PreCompact" || echo "NOT_FOUND"
+```
+
+### Step 2: Report Status
+
+**If hook exists:**
+```
+PreCompact hook is configured for auto-restart.
+
+When context fills up, loop will:
+1. Detect the context-full signal
+2. Save current progress
+3. Stop and instruct you to restart
+
+To test: run a few tasks and check if .loop/context-full appears
+         when context approaches the limit.
+
+To disable auto-restart: set `auto_restart: false` in .loop/config.md
+```
+
+**If hook not found:**
+```
+PreCompact hook is not configured.
+
+Without this hook, loop relies on task counting to detect when to restart.
+With the hook, loop can detect actual context usage and restart more accurately.
+
+Options:
+A. Add hook to global settings (~/.claude/settings.json)
+B. Add hook to project settings (.claude/settings.local.json)
+C. Skip - keep using task count limits only
+```
+
+### Step 3: Add Hook (if requested)
+
+**For global settings:**
+```bash
+# Read existing settings or create empty object
+if [ -f ~/.claude/settings.json ]; then
+  SETTINGS=$(cat ~/.claude/settings.json)
+else
+  SETTINGS='{}'
+fi
+```
+
+Then use jq or manual JSON editing to add:
+```json
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "type": "command",
+        "command": "if [ -d .loop ]; then touch .loop/context-full; fi"
+      }
+    ]
+  }
+}
+```
+
+**For project settings:**
+Create or update `.claude/settings.local.json` with the same hook.
+
+### Step 4: Verify
+
+```bash
+cat ~/.claude/settings.json | grep "context-full" && echo "Hook installed successfully"
+```
+
+Report:
+```
+Hook installed! Auto-restart is now enabled.
+
+Next time context fills up during loop execution:
+1. Claude Code will trigger the PreCompact hook
+2. The hook creates .loop/context-full signal
+3. Loop detects signal and stops gracefully
+4. You start a new conversation and say "continue loop"
+```
+
+---
+
 ## Commands
 
 Users can say:
@@ -683,6 +885,7 @@ Users can say:
 | `loop pause` | Stop after current task |
 | `loop reset` | Clear current project and start fresh |
 | `loop learnings` | Review and promote patterns to CLAUDE.md |
+| `loop hooks` | Check/setup PreCompact hook for auto-restart |
 
 ---
 
@@ -737,6 +940,19 @@ Orchestrator context is getting long. Recommend starting fresh session.
 All state is saved in .loop/ files. Just say "continue loop" to resume.
 Progress: [X]/[Y] tasks complete.
 ```
+
+### Context full detected (automatic)
+If the PreCompact hook is configured, loop will automatically detect when
+context is nearly full and stop gracefully:
+```
+CONTEXT FULL - Automatic restart needed
+Progress saved. Start a new conversation and say "continue loop" to resume.
+```
+
+This is more reliable than task counting because it responds to actual
+context usage, not just task count. To enable:
+1. Add the PreCompact hook to `.claude/settings.json` (see Config section)
+2. Set `auto_restart: true` in `.loop/config.md` (enabled by default)
 
 ### Conflicting changes from parallel subagents
 If parallel subagents touched the same files:
@@ -972,6 +1188,7 @@ Spawning subagent...
 - [ ] Initial commit made
 - [ ] Tasks are small enough (one session each)
 - [ ] Dependencies are correctly specified
+- [ ] PreCompact hook configured (optional, run `loop hooks` to check)
 
 ### After each task:
 - [ ] Task marked complete in tasks.md

@@ -1,6 +1,6 @@
 ---
 name: loop
-description: "Autonomous project execution with crash recovery. Triggers on: loop, start loop, continue loop, run the loop, set up project, resume project, loop plan, loop import. For large features (10+ tasks) with file-based state that persists across sessions."
+description: "Autonomous project execution with crash recovery. Triggers on: loop, start loop, continue loop, run the loop, set up project, resume project, loop plan, loop import, loop verify. For large features (10+ tasks) with file-based state that persists across sessions."
 ---
 
 # Loop - Large Project Execution
@@ -21,11 +21,17 @@ Loop uses **local files** to track state and **subagents for each task**, so you
 - **Main agent** = Orchestrator (reads state, spawns subagents, updates files)
 - **Subagents** = Workers (execute one task each with fresh context)
 
-**Four modes:**
+**Three-tier model strategy:**
+- **Haiku** = Orchestrator glue (classify tasks, gather context, parse results, compress progress)
+- **Sonnet** = Default worker (implement most tasks - fast and capable)
+- **Opus** = Heavy lifter (complex architecture, security, debugging, escalation from failed Sonnet)
+
+**Five modes:**
 1. **Plan** - Interactive planning session that generates the task file
 2. **Import** - Generate tasks from an existing PRD or requirements document
 3. **Quick Setup** - Manual setup when you already know the tasks
 4. **Continue** - Execute tasks via subagents until done or stopped
+5. **Verify** - Validate implementation against original PRD/requirements
 
 ### Recommended Workflow
 
@@ -46,6 +52,7 @@ continue loop                          # Execute tasks
 /prd                   # Create requirements document
 loop from-prd          # Import the PRD as tasks
 continue loop          # Execute tasks
+loop verify            # Validate against PRD
 ```
 
 ---
@@ -59,7 +66,6 @@ All state lives in a `.loop/` folder in the project root:
   tasks.md      # Task list with status and dependencies
   progress.md   # Append-only execution log
   config.md     # Project config and thresholds
-  context-full  # Signal file (created by PreCompact hook when context is filling)
 ```
 
 ### Config File (.loop/config.md)
@@ -70,7 +76,6 @@ All state lives in a `.loop/` folder in the project root:
 ## Session Limits
 max_tasks_per_session: 15    # Pause and recommend restart after N tasks
 warn_at_tasks: 12            # Show warning at this count
-auto_restart: true           # Automatically restart when context is filling
 
 ## Project
 name: [Project Name]
@@ -82,57 +87,24 @@ typecheck: npm run typecheck
 lint: npm run lint
 test: npm test
 
+## Source
+prd_path: [path to PRD if imported, or empty]
+
 ## Subagent Defaults
 default_subagent: general-purpose
 # Override per phase if needed:
 # phase_1_subagent: sql-pro
 # phase_3_subagent: test-automator
+
+## Model Strategy
+default_model: sonnet           # most tasks run on sonnet (fast, capable)
+complex_model: opus             # complex/security/architecture tasks
+quick_model: haiku              # orchestrator glue (classify, parse, compress)
+auto_escalate: true             # retry sonnet failures on opus automatically
+progress_compress_after: 10     # use haiku to compress progress.md after N tasks
 ```
 
 The orchestrator reads this config at the start of each session and tracks tasks completed in the current session.
-
-### Context Monitoring (PreCompact Hook)
-
-Loop can automatically detect when context is filling up and restart with a fresh session. This uses Claude Code's PreCompact hook, which fires just before automatic context compaction.
-
-**Setup:** Add this to your `.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "touch .loop/context-full && echo 'Context full signal created'"
-      }
-    ]
-  }
-}
-```
-
-Or create `.claude/settings.local.json` for project-specific hooks:
-
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "if [ -d .loop ]; then touch .loop/context-full; fi"
-      }
-    ]
-  }
-}
-```
-
-**How it works:**
-1. Claude Code triggers `PreCompact` hook when context window is nearly full
-2. Hook creates `.loop/context-full` signal file
-3. Before each task, orchestrator checks for this signal
-4. If signal exists: saves state, reports status, and instructs to restart
-5. On restart: signal file is cleaned up, execution continues seamlessly
-
-**Note:** The hook only creates the signal when a `.loop/` directory exists, so it won't affect non-loop sessions.
 
 ---
 
@@ -293,42 +265,11 @@ Should I create the loop files with this breakdown?
 
 Same as Plan mode Phase 3 - create all `.loop/` files and commit.
 
-### Example: Importing a PRD
+**Important:** Store the PRD source path in `.loop/config.md` so verification can reference it later:
 
-**User:** loop import tasks/prd-priority-system.md
-
-**Assistant:**
-```
-Reading PRD: Task Priority System
-
-Found 4 user stories:
-- US-001: Add priority field to database
-- US-002: Display priority indicator on task cards
-- US-003: Add priority selector to task edit
-- US-004: Filter tasks by priority
-
-Found 5 functional requirements (FR-1 through FR-5)
-
-Proposed task breakdown:
-
-Phase 1: Database
-1. Add priority column to tasks table (from US-001)
-   - Add migration for priority: 'high' | 'medium' | 'low'
-   - Default to 'medium'
-
-Phase 2: UI Components
-2. Add priority badge component (from US-002, needs: 1)
-   - Colored badges: red/yellow/gray
-   - Display on task cards
-3. Add priority selector to edit modal (from US-003, needs: 1)
-
-Phase 3: Features
-4. Implement priority filtering (from US-004, needs: 2)
-   - Filter dropdown in header
-   - URL param persistence
-5. Add priority sorting within columns (from FR-5, needs: 1)
-
-Shall I create the loop with these 5 tasks?
+```markdown
+## Source
+prd_path: tasks/prd-my-feature.md
 ```
 
 ---
@@ -423,6 +364,7 @@ Status: in-progress
 - `- [x]` = completed
 - `- [!]` = failed/blocked (needs attention)
 - `(needs: 1, 2)` = depends on tasks 1 and 2
+- `(model: opus)` = force a specific model for this task (optional, overrides auto-classification)
 
 ### Step 5: Initialize Progress Log
 
@@ -446,54 +388,11 @@ Create `.loop/progress.md`:
 
 ### Step 6: Create Config
 
-Create `.loop/config.md`:
-
-```markdown
-# Loop Config
-
-## Session Limits
-max_tasks_per_session: 15
-warn_at_tasks: 12
-
-## Project
-name: [Project Name]
-repo: [current directory]
-created: [date]
-
-## Commands
-typecheck: [detect from project or ask user]
-lint: [detect from project or ask user]
-test: [detect from project or ask user]
-
-## Subagent Defaults
-default_subagent: general-purpose
-```
-
-**Auto-detect commands** by checking:
-- `package.json` scripts (npm/node projects)
-- `Makefile` targets
-- `pyproject.toml` / `setup.py` (Python)
-- Ask user if unclear
+Create `.loop/config.md` using the format shown in the Config File section above. Auto-detect commands by checking `package.json`, `Makefile`, `pyproject.toml`, or ask user if unclear.
 
 ### Step 7: Commit and Confirm
 
-```bash
-mkdir -p .loop
-# (write files)
-git add .loop/
-git commit -m "chore: initialize loop for [project name]"
-```
-
-Show the user:
-```
-Loop initialized!
-
-Project: [name]
-Tasks: [count] across [phases] phases
-
-To start: say "continue loop" or "run the loop"
-To check status: say "loop status"
-```
+Commit `.loop/` files with `chore: initialize loop for [project name]`. Show task count, phase count, and remind user to say "continue loop" to start.
 
 ---
 
@@ -503,34 +402,23 @@ Start with: "continue loop", "run the loop", or just "loop"
 
 ### Step 0: Initialize Session Tracking (Orchestrator)
 
-At the START of each session:
-
-**Initialize counters:**
+At the START of each session, initialize:
 ```
 session_tasks_completed = 0
 ```
 
-**Clean up context signal from previous session:**
-```bash
-rm -f .loop/context-full
-```
-
-**Read config:**
+Read config:
 ```bash
 cat .loop/config.md
 ```
 
-**Extract settings:**
+Extract limits:
 - `max_tasks_per_session` (default: 15)
 - `warn_at_tasks` (default: 12)
-- `auto_restart` (default: true)
 
 ### Step 1: Read State (Orchestrator)
 
-```bash
-cat .loop/tasks.md
-cat .loop/progress.md
-```
+Read `.loop/tasks.md`, `.loop/progress.md`, and `.loop/config.md`.
 
 Parse:
 - Which tasks are done `[x]`
@@ -538,9 +426,11 @@ Parse:
 - Which tasks are blocked `[!]`
 - What dependencies are satisfied
 
+**Progress compression (Haiku):** If completed tasks exceed `progress_compress_after` (default: 10), spawn a Haiku agent to compress progress.md into ~100 lines: deduplicated patterns, key decisions, notable issues, and last 3 task entries in full. Store as `progress_context` for subagent prompts. Below threshold, use progress.md directly.
+
 ### Step 2: Find Next Task (Orchestrator)
 
-Select the first pending task where all dependencies are complete.
+Select the first pending task(s) where all dependencies are complete.
 
 If no task is ready:
 - All done → Report completion
@@ -550,84 +440,104 @@ If multiple tasks are ready:
 - Prefer tasks in the same area as recently completed work
 - Or ask user which to prioritize
 
-### Step 3: Gather Context (Orchestrator)
+### Step 3: Classify and Prepare (Haiku)
 
-Before spawning the subagent, gather everything it needs:
-
-1. **Task details** from tasks.md
-2. **Patterns** from progress.md "Patterns Discovered" section
-3. **Recent learnings** from last 2-3 task entries in progress.md
-4. **Relevant file paths** the task will likely touch
-5. **Project conventions** (from CLAUDE.md, AGENTS.md if they exist)
-
-### Step 3.5: Check Context Signal (Orchestrator)
-
-**Before spawning each subagent, check for context-full signal:**
-
-```bash
-if [ -f .loop/context-full ]; then echo "CONTEXT_FULL"; fi
-```
-
-**If signal exists and auto_restart is enabled:**
-
-```
-CONTEXT FULL - Automatic restart needed
-
-Current session has accumulated significant context. The PreCompact hook
-detected the context window is nearly full.
-
-Progress saved:
-- Tasks completed this session: [N]
-- Overall progress: [done]/[total] ([percent]%)
-- Next task ready: Task [M]: [description]
-
-To continue with fresh context, start a new conversation and say:
-  "continue loop"
-
-All state is preserved in .loop/ files. The loop will resume exactly
-where it left off.
-```
-
-Then STOP execution (do not spawn the subagent).
-
-**If signal exists but auto_restart is disabled:**
-- Log warning: "Context filling up, consider restarting soon"
-- Remove signal file: `rm .loop/context-full`
-- Continue execution
-
-### Step 4: Spawn Subagent (Orchestrator)
-
-Use the Task tool to execute the task:
+For each ready task, spawn a **Haiku agent** that classifies complexity and gathers context in a single call:
 
 ```
 Task tool:
   subagent_type: "general-purpose"
+  model: "haiku"
+  description: "Classify task [N]"
+  prompt: |
+    Analyze this task and prepare context for a worker agent.
+
+    ## Task
+    [Full task description from tasks.md]
+
+    ## Instructions
+
+    1. Search the codebase for files likely involved in this task (use Glob and Grep)
+    2. Read the most relevant files (max 5) to understand current state
+    3. Classify the task complexity
+
+    ## Classification Rules
+
+    Return EXACTLY this format:
+
+    MODEL: [sonnet|opus]
+    SUBAGENT: [best matching agent type from the list below]
+    FILES: [comma-separated list of relevant file paths]
+    CONTEXT: [2-3 sentence summary of current state of the code relevant to this task]
+
+    ## Agent Types and Classification Guide
+    Read the file `subagents.md` in the loop skill directory for the full list of
+    available agent types and the classification guide for choosing sonnet vs opus.
+```
+
+**Override logic:** If the task has an explicit `(model: opus)` or `(model: sonnet)` tag in tasks.md, skip classification and use that model directly. Still run Haiku for file discovery and context gathering.
+
+If multiple independent tasks are ready, spawn classification agents **in parallel** (one Haiku call per task).
+
+### Step 3.5: Gather Project Rules (Orchestrator)
+
+**CRITICAL:** Subagents do NOT inherit CLAUDE.md or any project context automatically. They only see what you put in the prompt. Before spawning any worker, the orchestrator MUST read and include:
+
+1. **Project CLAUDE.md** - Read `CLAUDE.md` from the project root (if it exists). This contains tech stack rules, forbidden libraries, coding conventions, and user preferences that ALL subagents must follow.
+2. **Global CLAUDE.md** - Read `~/.claude/CLAUDE.md` (if it exists). This contains the user's global preferences across all projects.
+3. **Context files** - If CLAUDE.md references context files (e.g., `context/tech-stack.md`, `context/conventions.md`), read those too.
+
+Extract the key rules into a `project_rules` block. Focus on:
+- Technology constraints (required/forbidden libraries and frameworks)
+- Code style requirements
+- Testing requirements
+- Security requirements
+- Any "NEVER do X" or "ALWAYS do Y" rules
+
+This only needs to be done **once per session** - cache the result and include it in every subagent prompt.
+
+### Step 4: Spawn Worker Subagent (Orchestrator)
+
+Use the Task tool with the **model from Step 3** (or config default):
+
+```
+Task tool:
+  subagent_type: [from Step 3 SUBAGENT classification]
+  model: [from Step 3 MODEL classification, or task override, or config default_model]
   description: "Task [N]: [short title]"
   prompt: |
+    ## Project Rules (MUST follow)
+    [project_rules from Step 3.5 - tech stack, forbidden libs, conventions]
+    [Include verbatim any NEVER/ALWAYS rules from CLAUDE.md]
+
     ## Task
     [Full task description from tasks.md]
 
     ## Context
     Project: [project name]
     Working directory: [path]
+    Model: [model being used] (if this fails, orchestrator may retry on opus)
+
+    ## Relevant Files
+    [FILES list from Step 3 Haiku classification]
+
+    ## Current State
+    [CONTEXT summary from Step 3 Haiku classification]
 
     ## Patterns & Learnings
-    [Paste relevant patterns from progress.md]
-
-    ## Files Likely Involved
-    - [file1]
-    - [file2]
+    [progress_context from Step 1 - compressed or raw]
 
     ## Instructions
-    1. Read the relevant files first to understand current state
-    2. Implement the task
-    3. Run type checks / linting: [project-specific command]
-    4. Run tests if relevant: [project-specific command]
-    5. If checks fail, fix the issues before completing
+    1. Read CLAUDE.md in the project root before starting (if you haven't already)
+    2. Read the relevant files first to understand current state
+    3. Implement the task following the project rules above
+    4. Run type checks / linting: [project-specific command]
+    5. Run tests if relevant: [project-specific command]
+    6. If checks fail, fix the issues before completing
 
     ## When Complete
     Report back with:
-    - DONE or FAILED
+    - DONE or FAILED or BLOCKED
     - Files changed (list)
     - Summary of what was implemented
     - Any issues encountered
@@ -645,15 +555,18 @@ Task tool:
     - Do NOT commit - orchestrator handles commits
     - Do NOT modify .loop/ files - orchestrator handles state
     - If you need user input, report BLOCKED with the question
+    - FOLLOW the Project Rules section above - these are non-negotiable user preferences
 ```
 
-### Step 5: Process Subagent Result (Orchestrator)
+If multiple independent tasks are ready and classified, spawn workers **in parallel**.
+
+### Step 5: Process Result (Orchestrator)
 
 **If DONE:**
 1. Update tasks.md: Change `- [ ] N.` to `- [x] N.`
 2. Append to progress.md:
    ```markdown
-   ### [Date] - Task [N]: [Title]
+   ### [Date] - Task [N]: [Title] [model: sonnet|opus]
    - What was done: [from subagent report]
    - Files changed: [from subagent report]
    - Patterns: [any PATTERN: lines from subagent]
@@ -670,15 +583,27 @@ Task tool:
    git commit -m "feat([scope]): [task description]"
    ```
 
-**If FAILED:**
-1. Update tasks.md: Change `- [ ] N.` to `- [!] N.`
-2. Log failure details in progress.md
-3. Ask user: retry, skip, or stop?
+**If FAILED (with auto-escalation):**
+1. Check if `auto_escalate` is enabled in config AND the task ran on sonnet:
+   - **Yes:** Log the failure reason, then **automatically retry on opus**:
+     ```
+     Task [N] failed on sonnet. Auto-escalating to opus...
+     ```
+     Re-spawn the worker subagent with `model: "opus"`, including the failure context:
+     ```
+     Previous attempt on sonnet failed with: [failure reason]
+     Please review what went wrong and implement correctly.
+     ```
+     If opus also fails → proceed to manual handling below
+   - **No (already on opus, or auto_escalate disabled):**
+     1. Update tasks.md: Change `- [ ] N.` to `- [!] N.`
+     2. Log failure details in progress.md with `[model: X, escalated: yes/no]`
+     3. Ask user: retry, skip, or stop?
 
 **If BLOCKED:**
 1. Present the subagent's question to user
 2. Get answer
-3. Re-spawn subagent with additional context
+3. Re-spawn subagent with additional context (same model)
 
 ### Step 6: Continue Loop (Orchestrator)
 
@@ -687,28 +612,6 @@ After successful task completion:
 ```
 session_tasks_completed += 1
 ```
-
-**Check context signal first (highest priority):**
-
-```bash
-if [ -f .loop/context-full ]; then echo "CONTEXT_FULL"; fi
-```
-
-If signal exists and auto_restart is enabled:
-```
-CONTEXT FULL - Automatic restart needed
-
-Completed Task [N] successfully, but context window is nearly full.
-
-Progress saved:
-- Tasks completed this session: [count]
-- Overall progress: [done]/[total] ([percent]%)
-- Next task ready: Task [M]: [description]
-
-To continue with fresh context, start a new conversation and say:
-  "continue loop"
-```
-Then STOP execution.
 
 **Check session limits:**
 
@@ -727,7 +630,13 @@ elif session_tasks_completed >= warn_at_tasks:
 **Then check task state:**
 1. If more tasks ready → Go to Step 2 (find next task)
 2. If no tasks ready but some pending → Report what's blocking
-3. If all done → Report completion and summarize
+3. If all done → Report completion, summarize, and suggest verification:
+   ```
+   All [N] tasks complete!
+
+   Recommend running verification to check implementation against requirements.
+   Say "loop verify" to validate, or "loop learnings" to review patterns first.
+   ```
 
 **Auto-continue** until:
 - Task fails
@@ -735,11 +644,217 @@ elif session_tasks_completed >= warn_at_tasks:
 - User interrupts (Ctrl+C or says "loop pause")
 - Subagent reports BLOCKED
 - **Session task limit reached**
-- **Context full signal detected** (auto-restart)
 
 ---
 
-## Mode 5: Reset
+## Mode 5: Verify
+
+Start with: "loop verify" (also auto-suggested when all tasks complete)
+
+Validates that the implementation actually satisfies the original PRD or requirements.
+
+### When to Run
+
+- **Automatically suggested** when the last task completes in Mode 4
+- **Manually** at any point via `loop verify`
+- **After resuming** if you want to check partial progress against requirements
+
+### Step 1: Locate Requirements Source (Orchestrator)
+
+Read `.loop/config.md` and look for `prd_path` under `## Source`.
+
+**If prd_path exists:** Read that file.
+**If prd_path is empty or missing:**
+1. Search for PRDs: `ls -lt tasks/prd-*.md 2>/dev/null | head -5`
+2. Check `.loop/tasks.md` header for any referenced source document
+3. If nothing found, ask the user: "Which requirements document should I verify against?"
+
+If no requirements doc exists at all (e.g., project was set up via `loop plan` without a PRD), fall back to **task-based verification** — verify each task's description and acceptance criteria were met.
+
+### Step 2: Extract Requirements (Haiku)
+
+Spawn a **Haiku agent** to parse the requirements document into a structured checklist:
+
+```
+Task tool:
+  subagent_type: "general-purpose"
+  model: "haiku"
+  description: "Extract verification checklist"
+  prompt: |
+    Read the following requirements document and extract every verifiable requirement.
+
+    ## Document
+    [contents of PRD or requirements file]
+
+    ## Instructions
+
+    Extract ALL of the following into a structured checklist:
+    1. User Stories - each one with its acceptance criteria
+    2. Functional Requirements (FR-1, FR-2, etc.)
+    3. Non-functional requirements (performance, security, accessibility)
+    4. Explicit constraints or rules mentioned anywhere
+
+    Skip non-goals, future considerations, and informational sections.
+
+    ## Output Format
+
+    Return EXACTLY this format (one entry per requirement):
+
+    REQUIREMENTS:
+    - REQ-1: [source ref, e.g. US-001 or FR-3] | [short description] | CRITERIA: [comma-separated acceptance criteria]
+    - REQ-2: ...
+    ...
+
+    TOTAL: [count]
+```
+
+For **task-based verification** (no PRD), extract requirements from `.loop/tasks.md` instead — each task description becomes a requirement, and completion criteria come from any notes or context in the task.
+
+### Step 3: Verify Each Requirement (Opus)
+
+Spawn an **Opus agent** (verification needs thoroughness) to check the codebase against every extracted requirement:
+
+```
+Task tool:
+  subagent_type: "code-reviewer"
+  model: "opus"
+  description: "Verify PRD implementation"
+  prompt: |
+    ## Project Rules
+    [project_rules from config/CLAUDE.md]
+
+    ## Task
+    Verify that the codebase correctly implements every requirement listed below.
+
+    ## Requirements to Verify
+    [structured checklist from Step 2]
+
+    ## Completed Tasks (for context)
+    [completed task list from .loop/tasks.md]
+
+    ## Instructions
+
+    For EACH requirement:
+    1. Search the codebase for the relevant implementation (use Glob and Grep)
+    2. Read the implementing code
+    3. Check each acceptance criterion
+    4. Run tests if they exist for this feature
+    5. Determine: PASS, FAIL, or PARTIAL
+
+    ## Output Format
+
+    Return EXACTLY this format:
+
+    VERIFICATION REPORT
+    ===================
+
+    ## Summary
+    Total: [N] requirements
+    Pass: [N]
+    Partial: [N]
+    Fail: [N]
+    Coverage: [percent]%
+
+    ## Results
+
+    ### PASS
+    - REQ-1: [source ref] | [description] | Evidence: [file:line or test name]
+    - REQ-2: ...
+
+    ### PARTIAL (implemented but incomplete)
+    - REQ-5: [source ref] | [description] | Missing: [what's incomplete] | Has: [what exists]
+
+    ### FAIL (not implemented)
+    - REQ-8: [source ref] | [description] | Expected: [what should exist] | Found: [nothing / wrong impl]
+
+    ### NOTES
+    - [any implementation concerns, edge cases, or quality observations]
+```
+
+### Step 4: Present Results (Orchestrator)
+
+Display the verification report to the user:
+
+```
+Verification: [project name] vs [PRD name]
+============================================
+
+Results: 14/16 requirements passed (87%)
+
+PASS (14):
+  US-001: Add priority field to database
+  US-002: Display priority indicator on task cards
+  ...
+
+PARTIAL (1):
+  FR-4: Filter tasks by priority
+    Has: Filter dropdown in header
+    Missing: URL param persistence
+
+FAIL (1):
+  FR-5: Sort by priority within columns
+    Expected: Priority sorting option in column header
+    Found: Not implemented
+
+What would you like to do?
+```
+
+### Step 5: Handle Gaps (Orchestrator)
+
+Offer options via AskUserQuestion:
+
+1. **Create tasks for gaps** — Add new tasks to `.loop/tasks.md` for each PARTIAL/FAIL item, then continue the loop
+2. **Accept as-is** — Mark the loop as verified with known gaps documented
+3. **Re-verify specific items** — Re-check individual requirements after manual fixes
+
+**If "Create tasks for gaps" is selected:**
+
+1. Generate a new task for each PARTIAL and FAIL requirement
+2. Append them to `.loop/tasks.md` as a new phase: `### Phase N+1: Verification Fixes`
+3. Set dependencies appropriately
+4. Log in progress.md: `### [Date] - Verification: [pass]/[total] passed, [N] fix tasks created`
+5. Prompt user: "Created [N] fix tasks. Say 'continue loop' to address them."
+
+**If "Accept as-is" is selected:**
+
+1. Log the verification results in progress.md
+2. Write a `VERIFICATION.md` report in `.loop/` for the record
+3. Mark the loop status as `verified` in tasks.md header
+
+### Verification Report File
+
+When verification completes (regardless of outcome), save the full report:
+
+```markdown
+# Verification Report
+
+Project: [name]
+Source: [PRD path]
+Date: [date]
+Result: [pass]/[total] ([percent]%)
+
+## Pass
+- [list]
+
+## Partial
+- [list with details]
+
+## Fail
+- [list with details]
+
+## Notes
+- [observations]
+```
+
+Save to `.loop/VERIFICATION.md` and commit:
+```bash
+git add .loop/VERIFICATION.md
+git commit -m "chore: add verification report ([pass]/[total] requirements met)"
+```
+
+---
+
+## Mode 6: Reset
 
 Start with: "loop reset"
 
@@ -776,97 +891,6 @@ Use this when you want to start fresh on a new set of features without the bagga
 
 ---
 
-## Mode 6: Hooks Setup
-
-Start with: "loop hooks"
-
-This mode checks if the PreCompact hook is configured and offers to set it up.
-
-### Step 1: Check Current Hook Configuration
-
-```bash
-cat ~/.claude/settings.json 2>/dev/null | grep -A5 "PreCompact" || echo "NOT_FOUND"
-cat .claude/settings.local.json 2>/dev/null | grep -A5 "PreCompact" || echo "NOT_FOUND"
-```
-
-### Step 2: Report Status
-
-**If hook exists:**
-```
-PreCompact hook is configured for auto-restart.
-
-When context fills up, loop will:
-1. Detect the context-full signal
-2. Save current progress
-3. Stop and instruct you to restart
-
-To test: run a few tasks and check if .loop/context-full appears
-         when context approaches the limit.
-
-To disable auto-restart: set `auto_restart: false` in .loop/config.md
-```
-
-**If hook not found:**
-```
-PreCompact hook is not configured.
-
-Without this hook, loop relies on task counting to detect when to restart.
-With the hook, loop can detect actual context usage and restart more accurately.
-
-Options:
-A. Add hook to global settings (~/.claude/settings.json)
-B. Add hook to project settings (.claude/settings.local.json)
-C. Skip - keep using task count limits only
-```
-
-### Step 3: Add Hook (if requested)
-
-**For global settings:**
-```bash
-# Read existing settings or create empty object
-if [ -f ~/.claude/settings.json ]; then
-  SETTINGS=$(cat ~/.claude/settings.json)
-else
-  SETTINGS='{}'
-fi
-```
-
-Then use jq or manual JSON editing to add:
-```json
-{
-  "hooks": {
-    "PreCompact": [
-      {
-        "type": "command",
-        "command": "if [ -d .loop ]; then touch .loop/context-full; fi"
-      }
-    ]
-  }
-}
-```
-
-**For project settings:**
-Create or update `.claude/settings.local.json` with the same hook.
-
-### Step 4: Verify
-
-```bash
-cat ~/.claude/settings.json | grep "context-full" && echo "Hook installed successfully"
-```
-
-Report:
-```
-Hook installed! Auto-restart is now enabled.
-
-Next time context fills up during loop execution:
-1. Claude Code will trigger the PreCompact hook
-2. The hook creates .loop/context-full signal
-3. Loop detects signal and stops gracefully
-4. You start a new conversation and say "continue loop"
-```
-
----
-
 ## Commands
 
 Users can say:
@@ -883,9 +907,24 @@ Users can say:
 | `loop skip [N]` | Skip a blocked task |
 | `loop add [desc]` | Add new task |
 | `loop pause` | Stop after current task |
+| `loop verify` | Verify implementation against PRD/requirements |
 | `loop reset` | Clear current project and start fresh |
 | `loop learnings` | Review and promote patterns to CLAUDE.md |
-| `loop hooks` | Check/setup PreCompact hook for auto-restart |
+
+---
+
+## Related Skills
+
+Loop connects to other skills in a pipeline:
+
+```
+/gsd:new-project  →  /prd from-gsd  →  loop import  →  continue loop  →  loop verify
+ (research)          (consolidate)      (plan tasks)    (execute)         (validate)
+```
+
+- **PRD** (`/prd`) — Create requirements documents. Use `/prd` from scratch, or `/prd from-gsd` to convert GSD research into a PRD.
+- **GSD** (`/gsd:new-project`) — Deep research and roadmapping. Use before `/prd from-gsd` for thorough upfront planning.
+- **Loop** works standalone too — use `loop plan` or `loop setup` when you don't need a PRD.
 
 ---
 
@@ -896,19 +935,30 @@ When asked for status, show:
 ```
 Project: [name]
 Progress: [done]/[total] tasks ([percent]%)
+Models used: [N] sonnet, [N] opus, [N] escalated
+Verification: [not run / pass (14/16) / pending]
+Source PRD: [path or "none"]
 
 Completed:
-  [x] 1. Task one
-  [x] 2. Task two
+  [x] 1. Task one [sonnet]
+  [x] 2. Task two [sonnet]
 
 Current/Ready:
   [ ] 3. Task three ← NEXT
 
 Blocked:
   [ ] 4. Task four (waiting on: 3)
-  [!] 5. Task five (FAILED - see progress.md)
+  [!] 5. Task five (FAILED on sonnet, escalated to opus - see progress.md)
 
 Remaining: [count] tasks
+```
+
+When all tasks are complete, also show:
+```
+All tasks complete! Next steps:
+  loop verify     - Validate implementation against requirements
+  loop learnings  - Review and promote patterns to CLAUDE.md
+  loop reset      - Archive and start fresh
 ```
 
 ---
@@ -941,19 +991,6 @@ All state is saved in .loop/ files. Just say "continue loop" to resume.
 Progress: [X]/[Y] tasks complete.
 ```
 
-### Context full detected (automatic)
-If the PreCompact hook is configured, loop will automatically detect when
-context is nearly full and stop gracefully:
-```
-CONTEXT FULL - Automatic restart needed
-Progress saved. Start a new conversation and say "continue loop" to resume.
-```
-
-This is more reliable than task counting because it responds to actual
-context usage, not just task count. To enable:
-1. Add the PreCompact hook to `.claude/settings.json` (see Config section)
-2. Set `auto_restart: true` in `.loop/config.md` (enabled by default)
-
 ### Conflicting changes from parallel subagents
 If parallel subagents touched the same files:
 1. Review the changes manually
@@ -965,54 +1002,17 @@ If parallel subagents touched the same files:
 
 ## Subagent Architecture
 
-**Every task runs in a subagent by default.** This ensures:
-- Fresh context per task (no buildup over 30+ tasks)
-- Isolation (one task's mess doesn't affect others)
-- Parallel execution possible (for independent tasks)
+Every task runs in a subagent. This ensures fresh context per task, isolation, and parallel execution.
 
-### Orchestrator Responsibilities (main agent)
-- Read and update `.loop/tasks.md`
-- Read and update `.loop/progress.md`
-- Gather context for subagents
-- Spawn subagents via Task tool
-- Process results and commit
-- Handle failures and user interaction
+**Orchestrator** (main agent): reads/updates `.loop/` files, spawns subagents, processes results, commits, handles failures.
 
-### Subagent Responsibilities (worker)
-- Read relevant source files
-- Implement the task
-- Run checks (typecheck, lint, test)
-- Report results back
-- **NOT** commit (orchestrator does this)
-- **NOT** modify .loop/ files (orchestrator does this)
+**Workers** (subagents): read source files, implement the task, run checks, report results. Do NOT commit or modify `.loop/` files.
 
-### Specialized Subagents
+**Specialized agents:** The full list of 25+ agent types with classification guidance is in `subagents.md` (same directory as this file). The Haiku classifier reads this during Step 3.
 
-Use specific subagent types when appropriate:
+**Parallel execution:** If multiple tasks are ready (no dependency conflicts), spawn classification and worker agents in parallel. Wait for all to complete, then update state and commit each.
 
-| Task Type | subagent_type |
-|-----------|---------------|
-| General implementation | `general-purpose` |
-| Writing tests | `test-automator` |
-| TypeScript work | `typescript-pro` |
-| Security-sensitive | `security-auditor` |
-| Database/SQL | `sql-pro` |
-| UI components | `frontend-design` |
-| Code review | `code-reviewer` |
-| Debugging | `debugger` |
-
-### Parallel Execution
-
-If multiple tasks are ready (no dependency conflicts), spawn them in parallel:
-
-```
-# In single message, multiple Task tool calls:
-Task 1: subagent for task 5
-Task 2: subagent for task 6
-Task 3: subagent for task 7
-```
-
-Wait for all to complete, then update state and commit each.
+**Auto-escalation:** Sonnet failure → auto-retry on Opus (if `auto_escalate: true` in config). If Opus also fails → mark `[!]`, ask user.
 
 ---
 
@@ -1037,57 +1037,11 @@ Valuable patterns that should persist beyond this loop:
 - Testing approaches that work
 - Architecture decisions made
 
-**When to promote to CLAUDE.md:**
+**Promotion to CLAUDE.md:** If a subagent reports a pattern that is generally applicable (not task-specific), ask the user: "Promote this pattern to CLAUDE.md?" If yes, append under `## Learnings`.
 
-After completing a task, if a subagent reports a learning that is:
-- Generally applicable (not just for this one task)
-- About project conventions or patterns
-- Something future work would benefit from
+**Automatic capture:** Subagents report patterns as `PATTERN: [category] - [description]`. The orchestrator adds these to progress.md "Patterns Discovered" (always) and offers CLAUDE.md promotion if broadly useful.
 
-Then the orchestrator should:
-1. Ask the user: "This pattern seems valuable. Add to project CLAUDE.md?"
-2. If yes, append to `CLAUDE.md` under a `## Learnings` section
-
-**Example promotion:**
-```markdown
-## Learnings
-
-### Database Patterns
-- All migrations use UUID primary keys, not auto-increment
-- Foreign keys follow `{table}_id` naming convention
-
-### API Conventions
-- All endpoints return `{ data, error, meta }` shape
-- Use zod schemas for validation, defined in `src/schemas/`
-
-### Testing
-- Integration tests use `setupTestDb()` from `tests/helpers`
-- Mock external APIs with `msw` handlers in `tests/mocks/`
-```
-
-### Automatic Learning Capture
-
-The subagent prompt includes instructions to report patterns in a structured format:
-```
-PATTERN: [category] - [description]
-```
-
-The orchestrator processes these by:
-1. Adding to `.loop/progress.md` "Patterns Discovered" (always)
-2. If pattern seems broadly useful, offering to add to `CLAUDE.md`
-
-### Manual Review: `loop learnings`
-
-At any point, run `loop learnings` to:
-1. Read all patterns from `.loop/progress.md`
-2. Present them grouped by category
-3. Ask which to promote to `CLAUDE.md`
-4. Update `CLAUDE.md` with selected patterns
-
-This is useful:
-- At the end of a loop, to consolidate learnings
-- Before `loop reset`, to preserve valuable knowledge
-- Periodically during long-running loops
+**Manual review (`loop learnings`):** Read all patterns from progress.md, present grouped by category, ask which to promote. Useful at end of loop, before `loop reset`, or periodically.
 
 ---
 
@@ -1102,83 +1056,6 @@ This is useful:
 
 ---
 
-## Example Session
-
-**User:** set up loop for refactoring auth system
-
-**Assistant:** What does the current auth system look like and what's the target state?
-
-**User:** [describes current JWT setup, wants to add refresh tokens and improve security]
-
-**Assistant:** Got it. Here's my proposed breakdown:
-
-Phase 1: Foundation
-1. Add refresh_token column to users table
-2. Create token generation utilities
-3. Update auth middleware
-
-Phase 2: Core
-4. Implement refresh token endpoint
-5. Update login to return both tokens
-6. Add token rotation on refresh
-
-Phase 3: Security
-7. Add refresh token revocation
-8. Implement token family tracking
-9. Add rate limiting
-
-Phase 4: Cleanup
-10. Update tests
-11. Update API documentation
-12. Remove deprecated code
-
-Does this look right?
-
-**User:** yes, create it
-
-**Assistant:** [Creates .loop/tasks.md and .loop/progress.md, commits]
-
-Loop initialized! 12 tasks across 4 phases.
-Say "continue loop" to start with task 1.
-
-**User:** continue loop
-
-**Assistant:**
-```
-Reading state...
-- Tasks: 0/12 complete
-- Next ready: Task 1 (no dependencies)
-
-Spawning subagent for Task 1: Add refresh_token column
-```
-[Spawns subagent via Task tool]
-
-```
-Subagent result: DONE
-- Files changed: db/migrations/20260125_add_refresh_token.sql, db/schema.ts
-- Learnings: Using nullable column for backward compatibility
-
-Committing: feat(auth): add refresh_token column to users table
-Task 1 complete (1/12)
-
-Next ready: Tasks 2, 3 (both depend only on task 1)
-Spawning subagents in parallel...
-```
-[Spawns 2 subagents in parallel]
-
-```
-Task 2: DONE - Created tokenUtils.ts with generate/verify functions
-Task 3: DONE - Updated middleware to check token expiry
-
-Committing both...
-Tasks 2, 3 complete (3/12)
-
-Next ready: Task 4 (depends on 2, 3 - both done)
-Spawning subagent...
-```
-
----
-
 ## Checklist
 
 ### Before starting execution:
@@ -1188,13 +1065,18 @@ Spawning subagent...
 - [ ] Initial commit made
 - [ ] Tasks are small enough (one session each)
 - [ ] Dependencies are correctly specified
-- [ ] PreCompact hook configured (optional, run `loop hooks` to check)
 
 ### After each task:
 - [ ] Task marked complete in tasks.md
 - [ ] Progress logged in progress.md
 - [ ] Changes committed
 - [ ] Tests/checks passing
+
+### After all tasks complete:
+- [ ] Run `loop verify` to check against PRD/requirements
+- [ ] Review PARTIAL and FAIL items
+- [ ] Create fix tasks or accept as-is
+- [ ] VERIFICATION.md committed
 
 ### When starting a new project (existing loop):
 - [ ] Run `loop reset` to archive or clear previous project

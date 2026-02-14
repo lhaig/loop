@@ -1,6 +1,6 @@
 ---
 name: loop
-description: "Autonomous project execution with crash recovery. Triggers on: loop, start loop, continue loop, run the loop, set up project, resume project, loop plan, loop import, loop verify. For large features (10+ tasks) with file-based state that persists across sessions."
+description: "Autonomous project execution with crash recovery. Triggers on: loop, start loop, continue loop, run the loop, set up project, resume project, loop plan, loop import, loop verify, loop statusline. For large features (10+ tasks) with file-based state that persists across sessions."
 ---
 
 # Loop - Large Project Execution
@@ -910,6 +910,55 @@ Users can say:
 | `loop verify` | Verify implementation against PRD/requirements |
 | `loop reset` | Clear current project and start fresh |
 | `loop learnings` | Review and promote patterns to CLAUDE.md |
+| `loop statusline` | Install a status line showing loop progress |
+| `loop statusline off` | Remove the loop status line |
+
+---
+
+## Mode 7: Statusline
+
+Start with: "loop statusline"
+
+Installs a status line at the bottom of the Claude Code TUI showing loop progress, model, and context usage.
+
+### How It Works
+
+This mode uses Claude Code's built-in `/statusline` command to generate a cross-platform bash script. No Node.js, Python, or compiled binaries required -- just bash, which is available everywhere Claude Code runs.
+
+### Install
+
+When the user says "loop statusline", invoke the `/statusline` skill with this prompt:
+
+```
+Show a status line with these elements, left to right, separated by dim pipe characters:
+
+1. Model name (dim text) from model.display_name
+2. Current loop task: read .loop/tasks.md in the current working directory (workspace.current_dir), find the first line matching "- \[ \]" (pending task) where all dependencies (numbers in "needs: X, Y") correspond to tasks marked "- \[x\]". Show the task description in bold. If no .loop/tasks.md exists or no task is ready, skip this element.
+3. Loop progress: count lines matching "- \[x\]" as done and total "- \[" lines as total in .loop/tasks.md. Show as "[done/total]" in dim text. Skip if no .loop/tasks.md.
+4. Directory basename (dim text)
+5. Context window usage: build a 10-segment progress bar using filled/empty block characters. Color it green below 63%, yellow below 81%, orange below 95%, red+blinking at 95%+. Scale the percentage so that 80% real usage displays as 100% (Claude Code enforces an 80% context limit). Show the scaled percentage number after the bar.
+
+Keep the script portable (bash, no jq, no python, no node). Parse the JSON from stdin using grep/sed/awk. Handle missing .loop/tasks.md gracefully (just skip loop-related elements).
+```
+
+After the statusline is generated, confirm to the user:
+
+```
+Loop statusline installed! You should see it at the bottom of your screen.
+
+It shows: model | current task | [done/total] | directory | context bar
+
+To remove it later: say "loop statusline off"
+```
+
+### Uninstall
+
+When the user says "loop statusline off":
+
+1. Read `~/.claude/settings.json`
+2. Remove the `statusLine` key entirely
+3. Write the file back
+4. Confirm: "Loop statusline removed."
 
 ---
 

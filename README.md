@@ -16,12 +16,7 @@ Creates detailed Product Requirements Documents through interactive Q&A.
 **What it does:**
 1. Asks 3-5 clarifying questions with lettered options (answer like "1A, 2C, 3B")
 2. Generates a structured PRD with user stories, functional requirements, and acceptance criteria
-3. Saves to `tasks/prd-[feature-name].md`
-
-**When to use:**
-- Starting a new feature
-- Planning before implementation
-- Documenting requirements for a team
+3. Saves to `.planning/prd-[feature-name].md`
 
 ### Loop (`/loop`)
 
@@ -33,6 +28,7 @@ loop plan          # Interactive planning session
 loop import [path] # Generate tasks from a PRD
 loop               # Continue executing tasks
 loop status        # Check progress
+loop verify        # Validate against requirements
 loop reset         # Start fresh
 ```
 
@@ -41,12 +37,6 @@ loop reset         # Start fresh
 - Executes each task in an isolated subagent (fresh context per task)
 - Commits after each task (safe checkpoints)
 - Tracks state in `.loop/` files so you can resume after crashes or session ends
-- Captures patterns and learnings as you work
-
-**When to use:**
-- Large features requiring 10+ distinct changes
-- Refactoring projects
-- Any work that might span multiple sessions
 
 ## Recommended Workflow
 
@@ -55,9 +45,10 @@ loop reset         # Start fresh
 /prd                    # Plan the feature, create requirements
 loop import             # Convert PRD to executable tasks
 loop                    # Execute until done
+loop verify             # Validate against PRD
 ```
 
-**For quick projects where you know the tasks:**
+**When you already know the tasks:**
 ```
 loop plan               # Discuss and plan interactively
 loop                    # Execute until done
@@ -76,28 +67,29 @@ loop                    # Execute until done
 
 2. Restart Claude Code or reload skills
 
-3. Verify installation:
-   ```
-   /prd --help
-   loop status
-   ```
-
 ## File Structure
 
 ```
 skills/
   loop/
-    SKILL.md      # Loop skill definition
+    SKILL.md        # Loop skill definition
+    subagents.md    # Agent type reference (read by Haiku classifier)
   prd/
-    SKILL.md      # PRD skill definition
+    SKILL.md        # PRD skill definition
 ```
 
-**Loop creates these files in your project:**
+**PRD creates:**
+```
+.planning/
+  prd-[feature].md  # Requirements document
+```
+
+**Loop creates:**
 ```
 .loop/
-  tasks.md        # Task list with status and dependencies
-  progress.md     # Execution log and discovered patterns
-  config.md       # Project config (commands, limits)
+  tasks.md          # Task list with status and dependencies
+  progress.md       # Execution log and discovered patterns
+  config.md         # Project config (commands, limits)
 ```
 
 ## Requirements

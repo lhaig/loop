@@ -92,6 +92,32 @@ skills/
   config.md         # Project config (commands, limits)
 ```
 
+### Statusline
+
+A status bar that shows context usage, model, cost, and git branch at the bottom of your terminal.
+
+```
+[Opus] [####------] 42% | $0.35 | main
+```
+
+**Installation:**
+```bash
+cp statusline/statusline.sh ~/.claude/statusline.sh
+chmod +x ~/.claude/statusline.sh
+```
+
+Add to `~/.claude/settings.json`:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "~/.claude/statusline.sh"
+  }
+}
+```
+
+See [statusline/README.md](statusline/README.md) for details.
+
 ## Requirements
 
 - [Claude Code](https://claude.ai/code) CLI

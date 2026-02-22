@@ -3,7 +3,7 @@
 A status bar for Claude Code that shows context usage, model name, cost, and git branch at the bottom of your terminal.
 
 ```
-[Opus] [####------] 42% | $0.35 | main
+[Opus] [####------] 42% | $0.35 | devdir | main
 ```
 
 ## Installation
@@ -33,6 +33,7 @@ A status bar for Claude Code that shows context usage, model name, cost, and git
 | Model name | `model.display_name` (Opus, Sonnet, Haiku) |
 | Context usage | `context_window.used_percentage` with a progress bar |
 | Session cost | `cost.total_cost_usd` |
+| Current Directory | Current directory
 | Git branch | Current branch from the project directory |
 
 ## Requirements

@@ -18,40 +18,40 @@ Creates detailed Product Requirements Documents through interactive Q&A.
 2. Generates a structured PRD with user stories, functional requirements, and acceptance criteria
 3. Saves to `.planning/prd-[feature-name].md`
 
-### Loop (`/loop`)
+### norman (`/norman`)
 
 Executes large projects (10+ tasks) with crash recovery and session persistence.
 
 **Usage:**
 ```
-loop plan          # Interactive planning session
-loop import [path] # Generate tasks from a PRD
-loop               # Continue executing tasks
-loop status        # Check progress
-loop verify        # Validate against requirements
-loop reset         # Start fresh
+norman plan          # Interactive planning session
+norman import [path] # Generate tasks from a PRD
+norman               # Continue executing tasks
+norman status        # Check progress
+norman verify        # Validate against requirements
+norman reset         # Start fresh
 ```
 
 **What it does:**
 - Breaks projects into small, atomic tasks with dependencies
 - Executes each task in an isolated subagent (fresh context per task)
 - Commits after each task (safe checkpoints)
-- Tracks state in `.loop/` files so you can resume after crashes or session ends
+- Tracks state in `.norman/` files so you can resume after crashes or session ends
 
 ## Recommended Workflow
 
 **For new features:**
 ```
 /prd                    # Plan the feature, create requirements
-loop import             # Convert PRD to executable tasks
-loop                    # Execute until done
-loop verify             # Validate against PRD
+norman import             # Convert PRD to executable tasks
+norman                    # Execute until done
+norman verify             # Validate against PRD
 ```
 
 **When you already know the tasks:**
 ```
-loop plan               # Discuss and plan interactively
-loop                    # Execute until done
+norman plan               # Discuss and plan interactively
+norman                    # Execute until done
 ```
 
 ## Installation
@@ -61,7 +61,7 @@ loop                    # Execute until done
    # Find your skills directory
    # Usually: ~/.claude/skills/ or configured in Claude Code settings
 
-   cp -r loop/ ~/.claude/skills/
+   cp -r norman/ ~/.claude/skills/
    cp -r prd/ ~/.claude/skills/
    ```
 
@@ -71,8 +71,8 @@ loop                    # Execute until done
 
 ```
 skills/
-  loop/
-    SKILL.md        # Loop skill definition
+  norman/
+    SKILL.md        # norman skill definition
     subagents.md    # Agent type reference (read by Haiku classifier)
   prd/
     SKILL.md        # PRD skill definition
@@ -84,9 +84,9 @@ skills/
   prd-[feature].md  # Requirements document
 ```
 
-**Loop creates:**
+**Norman creates:**
 ```
-.loop/
+.norman/
   tasks.md          # Task list with status and dependencies
   progress.md       # Execution log and discovered patterns
   config.md         # Project config (commands, limits)

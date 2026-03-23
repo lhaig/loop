@@ -1,4 +1,4 @@
-# Loop Subagent Reference
+# Norman Subagent Reference
 
 This file is read by the Haiku classifier during Step 3 of Mode 4 (Continue).
 The orchestrator does NOT need this in its main context.

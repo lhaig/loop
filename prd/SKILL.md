@@ -21,11 +21,11 @@ Create detailed Product Requirements Documents that are clear, actionable, and s
 ## Related Skills
 
 ```
-/prd              →  loop import  →  continue loop  →  loop verify
+/prd              →  norman import  →  continue norman  →  norman verify
  (requirements)      (plan tasks)    (execute)         (validate)
 ```
 
-- **Loop** — Autonomous task execution. Use `loop import .planning/prd-*.md` to import a PRD as executable tasks.
+- **Norman** — Autonomous task execution. Use `norman import .planning/prd-*.md` to import a PRD as executable tasks.
 
 ---
 

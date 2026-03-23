@@ -1,9 +1,9 @@
 ---
-name: loop
-description: "Autonomous project execution with crash recovery. Triggers on: loop, start loop, continue loop, run the loop, set up project, resume project, loop plan, loop import, loop verify. For large features (10+ tasks) with file-based state that persists across sessions."
+name: norman
+description: "Autonomous project execution with crash recovery. Triggers on: norman, start norman, continue norman, run the norman, set up project, resume project, norman plan, norman import, norman verify. For large features (10+ tasks) with file-based state that persists across sessions."
 ---
 
-# Loop - Large Project Execution
+# Norman - Large Project Execution
 
 Execute large projects with crash recovery and session persistence.
 
@@ -11,7 +11,7 @@ Execute large projects with crash recovery and session persistence.
 
 ## Overview
 
-Loop uses **local files** to track state and **subagents for each task**, so you can:
+Norman uses **local files** to track state and **subagents for each task**, so you can:
 - Resume after crashes or session ends
 - Have git commits as safe checkpoints
 - Keep context fresh (each task runs in isolated subagent)
@@ -35,35 +35,35 @@ Loop uses **local files** to track state and **subagents for each task**, so you
 
 **For new features in existing projects:**
 ```
-loop plan              # Discuss and plan
-continue loop          # Execute tasks
+norman plan              # Discuss and plan
+continue norman          # Execute tasks
 ```
 
 **End-to-end with PRD skill:**
 ```
 /prd                   # Create requirements document
-loop from-prd          # Import the PRD as tasks
-continue loop          # Execute tasks
-loop verify            # Validate against PRD
+norman from-prd          # Import the PRD as tasks
+continue norman          # Execute tasks
+norman verify            # Validate against PRD
 ```
 
 ---
 
 ## File Structure
 
-**CRITICAL:** All state MUST live in a `.loop/` folder in the project root. NEVER store loop state anywhere else.
+**CRITICAL:** All state MUST live in a `.norman/` folder in the project root. NEVER store norman state anywhere else.
 
 ```
-.loop/
+.norman/
   tasks.md      # Task list with status and dependencies
   progress.md   # Append-only execution log
   config.md     # Project config and thresholds
 ```
 
-### Config File (.loop/config.md)
+### Config File (.norman/config.md)
 
 ```markdown
-# Loop Config
+# Norman Config
 
 ## Session Limits
 max_tasks_per_session: 15
@@ -97,7 +97,7 @@ progress_compress_after: 10
 
 ## Mode 1: Plan (Interactive Planning)
 
-Start with: "loop plan" or "plan a loop"
+Start with: "norman plan" or "plan a norman"
 
 ### Phase 1: Discovery
 
@@ -130,13 +130,13 @@ Does this look right? Any tasks to add, remove, or reorder?
 
 ### Phase 3: Generate Files
 
-Once approved, create `.loop/` directory with `tasks.md`, `config.md` (auto-detect project commands from package.json/Makefile/pyproject.toml), and `progress.md`. Commit with `chore: initialize loop for [project name]`.
+Once approved, create `.norman/` directory with `tasks.md`, `config.md` (auto-detect project commands from package.json/Makefile/pyproject.toml), and `progress.md`. Commit with `chore: initialize norman for [project name]`.
 
 ---
 
 ## Mode 2: Import (From PRD/Requirements)
 
-Start with: "loop import [path]" or "loop from-prd"
+Start with: "norman import [path]" or "norman from-prd"
 
 ### Supported Formats
 
@@ -150,21 +150,21 @@ Start with: "loop import [path]" or "loop from-prd"
 2. **Extract tasks** — Parse user stories (US-001), functional requirements (FR-1), and acceptance criteria. Transform each into a task.
 3. **Analyze dependencies** — Order by explicit deps, logical sequence (schema > API > UI), and cross-references
 4. **Present for review** — Show extracted tasks grouped by phase, list excluded non-goals
-5. **Generate files** — Same as Plan mode Phase 3. Store PRD source path in `.loop/config.md` under `## Source`
+5. **Generate files** — Same as Plan mode Phase 3. Store PRD source path in `.norman/config.md` under `## Source`
 
 ---
 
 ## Mode 3: Continue
 
-Start with: "continue loop", "run the loop", or just "loop"
+Start with: "continue norman", "run the norman", or just "norman"
 
 ### Step 0: Initialize Session
 
-Read `.loop/config.md`, initialize `session_tasks_completed = 0`, extract session limits.
+Read `.norman/config.md`, initialize `session_tasks_completed = 0`, extract session limits.
 
 ### Step 1: Read State
 
-Read `.loop/tasks.md`, `.loop/progress.md`, and `.loop/config.md`. Parse task statuses: `[x]` done, `[ ]` pending, `[!]` blocked.
+Read `.norman/tasks.md`, `.norman/progress.md`, and `.norman/config.md`. Parse task statuses: `[x]` done, `[ ]` pending, `[!]` blocked.
 
 **Progress compression:** If completed tasks exceed `progress_compress_after`, spawn a Haiku agent to compress progress.md into ~100 lines of deduplicated patterns, key decisions, and last 3 full entries.
 
@@ -199,7 +199,7 @@ Use Task tool with classified model and subagent type. The prompt MUST include:
 - **Patterns & learnings** from progress.md
 - **Project commands** for typecheck/lint/test
 - Instructions to report: DONE/FAILED/BLOCKED, files changed, summary, and any `PATTERN: [category] - [description]` discoveries
-- Rules: do NOT commit, do NOT modify `.loop/` files
+- Rules: do NOT commit, do NOT modify `.norman/` files
 
 Spawn multiple independent workers in parallel if multiple tasks are ready.
 
@@ -211,13 +211,13 @@ Spawn multiple independent workers in parallel if multiple tasks are ready.
 
 **BLOCKED:** Present subagent's question to user, get answer, re-spawn with additional context.
 
-### Step 6: Continue Loop
+### Step 6: Continue Norman
 
 Increment `session_tasks_completed`. Check limits:
 - At `warn_at_tasks`: show warning, continue
 - At `max_tasks_per_session`: stop, report progress, recommend fresh session
 
-Then: more tasks ready → Step 2. Nothing ready but some pending → report blockers. All done → report completion, suggest `loop verify`.
+Then: more tasks ready → Step 2. Nothing ready but some pending → report blockers. All done → report completion, suggest `norman verify`.
 
 Auto-continue until: task fails, all complete, user interrupts, subagent blocked, or session limit reached.
 
@@ -225,11 +225,11 @@ Auto-continue until: task fails, all complete, user interrupts, subagent blocked
 
 ## Mode 4: Verify
 
-Start with: "loop verify"
+Start with: "norman verify"
 
 ### Process
 
-1. **Locate requirements** — Check `prd_path` in `.loop/config.md`, search `.planning/prd-*.md`, or ask user. If no PRD exists, fall back to task-based verification using tasks.md descriptions.
+1. **Locate requirements** — Check `prd_path` in `.norman/config.md`, search `.planning/prd-*.md`, or ask user. If no PRD exists, fall back to task-based verification using tasks.md descriptions.
 
 2. **Extract requirements (Haiku)** — Parse the requirements doc into a structured checklist: user stories with acceptance criteria, functional requirements, non-functional requirements, explicit constraints. Skip non-goals.
 
@@ -238,21 +238,21 @@ Start with: "loop verify"
 4. **Present results** — Show pass/partial/fail counts and details.
 
 5. **Handle gaps** — Offer via AskUserQuestion:
-   - **Create tasks for gaps** — Add fix tasks to `.loop/tasks.md` as a new phase, continue loop
-   - **Accept as-is** — Log results, write `.loop/VERIFICATION.md`, mark loop as verified
+   - **Create tasks for gaps** — Add fix tasks to `.norman/tasks.md` as a new phase, continue norman
+   - **Accept as-is** — Log results, write `.norman/VERIFICATION.md`, mark norman as verified
    - **Re-verify specific items** — Re-check individual requirements after manual fixes
 
-Save verification report to `.loop/VERIFICATION.md` and commit.
+Save verification report to `.norman/VERIFICATION.md` and commit.
 
 ---
 
 ## Mode 5: Reset
 
-Start with: "loop reset"
+Start with: "norman reset"
 
 Check current state (incomplete tasks, uncommitted changes), then offer:
-- **Archive** — Move `.loop/` to `.loop-archive/[project-name]-[date]/`, ready for new project
-- **Delete** — Remove `.loop/` entirely, commit removal
+- **Archive** — Move `.norman/` to `.norman-archive/[project-name]-[date]/`, ready for new project
+- **Delete** — Remove `.norman/` entirely, commit removal
 - **Cancel**
 
 ---
@@ -261,46 +261,46 @@ Check current state (incomplete tasks, uncommitted changes), then offer:
 
 | Command | Action |
 |---------|--------|
-| `loop` / `continue loop` | Execute next task(s) |
-| `loop plan` | Interactive planning session |
-| `loop import [path]` | Generate tasks from PRD or requirements doc |
-| `loop from-prd` | Search for and import from recent PRD |
-| `loop status` | Show progress summary |
-| `loop task [N]` | Execute specific task |
-| `loop skip [N]` | Skip a blocked task |
-| `loop add [desc]` | Add new task |
-| `loop pause` | Stop after current task |
-| `loop verify` | Verify implementation against PRD/requirements |
-| `loop reset` | Clear current project and start fresh |
-| `loop learnings` | Review and promote patterns to CLAUDE.md |
+| `norman` / `continue norman` | Execute next task(s) |
+| `norman plan` | Interactive planning session |
+| `norman import [path]` | Generate tasks from PRD or requirements doc |
+| `norman from-prd` | Search for and import from recent PRD |
+| `norman status` | Show progress summary |
+| `norman task [N]` | Execute specific task |
+| `norman skip [N]` | Skip a blocked task |
+| `norman add [desc]` | Add new task |
+| `norman pause` | Stop after current task |
+| `norman verify` | Verify implementation against PRD/requirements |
+| `norman reset` | Clear current project and start fresh |
+| `norman learnings` | Review and promote patterns to CLAUDE.md |
 
 ---
 
 ## Related Skills
 
 ```
-/prd              →  loop import  →  continue loop  →  loop verify
+/prd              →  norman import  →  continue norman  →  norman verify
  (requirements)      (plan tasks)    (execute)         (validate)
 ```
 
 - **PRD** (`/prd`) — Create requirements documents, saved to `.planning/`.
-- **Loop** works standalone too — use `loop plan` when you don't need a PRD.
+- **Norman** works standalone too — use `norman plan` when you don't need a PRD.
 
 ---
 
 ## Status Report
 
-When asked for status, show: project name, progress (done/total/percent), models used, verification status, source PRD, then list completed/ready/blocked/remaining tasks. When all complete, suggest `loop verify`, `loop learnings`, or `loop reset`.
+When asked for status, show: project name, progress (done/total/percent), models used, verification status, source PRD, then list completed/ready/blocked/remaining tasks. When all complete, suggest `norman verify`, `norman learnings`, or `norman reset`.
 
 ---
 
 ## Recovery
 
-- **Session crashed** — Just say "continue loop", state is in files
+- **Session crashed** — Just say "continue norman", state is in files
 - **Task partially complete** — Check git status, either commit partial progress or `git checkout .` and retry
 - **Wrong task executed** — Revert commit, mark task pending, continue
 - **Subagent failed/timed out** — Check changes, commit or reset, mark `[!]`, continue or retry
-- **Context getting long** — After ~15-20 tasks, recommend fresh session. All state persists in `.loop/` files.
+- **Context getting long** — After ~15-20 tasks, recommend fresh session. All state persists in `.norman/` files.
 
 ---
 
@@ -336,7 +336,7 @@ Status: in-progress
 
 ## Subagent Architecture
 
-Every task runs in a subagent for fresh context and isolation. The orchestrator reads/updates `.loop/` files, spawns subagents, processes results, and commits. Workers implement tasks and report results but do NOT commit or modify `.loop/` files.
+Every task runs in a subagent for fresh context and isolation. The orchestrator reads/updates `.norman/` files, spawns subagents, processes results, and commits. Workers implement tasks and report results but do NOT commit or modify `.norman/` files.
 
 **Specialized agents:** The full list of 25+ agent types with classification guidance is in `subagents.md` (same directory as this file).
 
@@ -348,6 +348,6 @@ Every task runs in a subagent for fresh context and isolation. The orchestrator 
 
 ## Knowledge Persistence
 
-- **Session learnings** (`.loop/progress.md`) — Patterns discovered during execution, passed to each subagent via the "Patterns & Learnings" section
+- **Session learnings** (`.norman/progress.md`) — Patterns discovered during execution, passed to each subagent via the "Patterns & Learnings" section
 - **Permanent learnings** (`CLAUDE.md`) — Broadly useful patterns promoted from progress.md. Subagents report patterns as `PATTERN: [category] - [description]`. Orchestrator always adds to progress.md and offers CLAUDE.md promotion if broadly useful.
-- **Manual review** (`loop learnings`) — Review all patterns, grouped by category, choose which to promote
+- **Manual review** (`norman learnings`) — Review all patterns, grouped by category, choose which to promote

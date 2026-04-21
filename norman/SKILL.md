@@ -20,10 +20,10 @@ Norman uses **local files in `prds/`** to track all state and **subagents for ea
 - **Main agent** = Orchestrator (reads state, spawns subagents, updates files)
 - **Subagents** = Workers (execute one task each with fresh context)
 
-**Three-tier model strategy:**
-- **Haiku** = Orchestrator glue (classify tasks, gather context, parse results, compress progress)
-- **Sonnet** = Default worker (implement most tasks)
-- **Opus** = Heavy lifter (complex architecture, security, debugging, escalation from failed Sonnet)
+**Advisor model strategy:**
+- **Opus** = Advisor (reviews plans before execution, reviews completed work, diagnoses failures, makes architectural calls)
+- **Sonnet** = Worker (implements all tasks)
+- **Haiku** = Support (classify tasks, gather context, parse results, compress progress)
 
 **Five modes:**
 1. **PRD** - Generate a requirements document in `prds/research/`
@@ -115,10 +115,9 @@ lint: gosec ./...
 default_subagent: general-purpose
 
 ## Model Strategy
+advisor_mode: always        # always | auto | never — controls Opus advisory review
 default_model: sonnet
-complex_model: opus
 quick_model: haiku
-auto_escalate: true
 progress_compress_after: 10
 ```
 
@@ -322,9 +321,25 @@ If no tasks are ready: report completion or what's blocking.
 Spawn a Haiku agent to classify each ready task. It should:
 1. Search the codebase for relevant files (Glob/Grep)
 2. Read the most relevant files (max 5)
-3. Return: `MODEL: [sonnet|opus]`, `SUBAGENT: [agent type]`, `FILES: [paths]`, `CONTEXT: [summary]`
+3. Return: `SUBAGENT: [agent type]`, `FILES: [paths]`, `CONTEXT: [summary]`, `COMPLEXITY: [low|medium|high]`
 
-Use the classification guide in `subagents.md`. If the task has an explicit `(model: opus)` tag, skip classification but still gather context. Classify multiple ready tasks in parallel.
+Use the classification guide in `subagents.md`. Classify multiple ready tasks in parallel.
+
+### Step 3.1: Advisor Plan Review (Opus)
+
+**When `advisor_mode` is `always`:** Spawn an Opus agent for every task.
+**When `advisor_mode` is `auto`:** Only spawn if Haiku classified the task as `COMPLEXITY: high` or `medium`.
+**When `advisor_mode` is `never`:** Skip this step entirely.
+
+The Opus advisor receives the task description, acceptance criteria, classified files, and context from Step 3. It returns:
+- **APPROACH:** A concise implementation plan (which files to change, what pattern to follow, edge cases to handle)
+- **RISKS:** Anything the worker should watch out for (breaking changes, concurrency, security)
+- **SEQUENCE:** If multiple tasks are being planned, recommended execution order
+- **VERDICT:** `PROCEED` or `REVISE` — if REVISE, include what needs changing in the task definition
+
+If the advisor returns `REVISE`, update the task description in TASKS.md before spawning the worker. Log the advisor's guidance in progress.md.
+
+The advisor's APPROACH and RISKS are passed directly to the worker in Step 5.
 
 ### Step 3.5: Gather Project Rules (Once Per Session)
 
@@ -345,10 +360,11 @@ Before spawning the worker:
 
 ### Step 5: Spawn Worker Subagent
 
-Use Agent tool with classified model and subagent type. The prompt MUST include:
+Use Agent tool with subagent type from Step 3 and model `sonnet`. The prompt MUST include:
 - **Project Rules** from Step 3.5 (non-negotiable)
 - **Task description** from TASKS.md
 - **Acceptance criteria** from the PRD file
+- **Advisor guidance** — APPROACH and RISKS from Step 3.1 (if advisor was run). Frame these as requirements: "The advisor has reviewed this task and recommends the following approach..."
 - **Relevant files** and **current state** from Step 3
 - **Patterns & learnings** from progress.md
 - **Project commands** for build/lint/test
@@ -359,14 +375,36 @@ Spawn multiple independent workers in parallel if multiple tasks are ready.
 
 ### Step 6: Process Result
 
-**DONE:**
+**DONE — Step 6.1: Advisor Code Review (Opus)**
+
+**When `advisor_mode` is `always`:** Spawn an Opus code-reviewer agent for every completed task.
+**When `advisor_mode` is `auto`:** Only spawn if the task was classified as `COMPLEXITY: high` or `medium`.
+**When `advisor_mode` is `never`:** Skip to Step 6.2.
+
+The Opus reviewer receives: the task description, acceptance criteria, advisor's original APPROACH from Step 3.1, and the worker's reported file changes. It reads the changed files and returns:
+- **QUALITY:** `PASS`, `MINOR`, or `REJECT`
+- **ISSUES:** List of specific problems (if any), each with file path and description
+- **PATTERNS:** Any broadly useful patterns discovered
+
+`PASS` — Proceed to commit (Step 6.2).
+`MINOR` — Log issues in progress.md as improvement notes, proceed to commit. These are suggestions, not blockers.
+`REJECT` — Do NOT commit. Re-spawn the Sonnet worker with the reviewer's specific issues as fix instructions. After the second attempt, run the reviewer again. If rejected twice, mark BLOCKED and ask the user.
+
+**Step 6.2: Commit**
+
 1. Move PRD from `prds/active/` to `prds/done/` using git mv
 2. Update TASKS.md row: status -> `DONE (date)`, PRD link -> `done/`, add summary note
-3. Append to `prds/progress.md` (date, task, model, changes, patterns)
+3. Append to `prds/progress.md` (date, task, changes, patterns, advisor review result)
 4. Commit with `feat([scope]): [description]`
-5. If subagent reported broadly useful patterns, offer to promote to CLAUDE.md
+5. If subagent or advisor reported broadly useful patterns, offer to promote to CLAUDE.md
 
-**FAILED:** If `auto_escalate` is enabled and task ran on sonnet, auto-retry on opus with failure context. If opus also fails or escalation disabled, update TASKS.md status -> `BLOCKED`, log failure, ask user: retry/skip/stop.
+**FAILED — Advisor-Guided Recovery:**
+
+Instead of retrying the whole task on Opus, use Opus as a diagnostician:
+1. Spawn an Opus agent with the failure context (error messages, partial changes, worker's report)
+2. Opus returns: `DIAGNOSIS` (what went wrong), `FIX_GUIDANCE` (specific instructions for the worker to retry)
+3. Re-spawn Sonnet worker with the original task + Opus fix guidance
+4. If the guided retry also fails, mark BLOCKED in TASKS.md, log both failures, ask user: retry/skip/stop
 
 **BLOCKED:** Present subagent's question to user, get answer, re-spawn with additional context.
 
@@ -392,7 +430,7 @@ Start with: "norman verify"
 
 2. **Extract requirements (Haiku)** — Parse the PRD(s) into a structured checklist: user stories with acceptance criteria, functional requirements, non-functional requirements, explicit constraints. Skip non-goals.
 
-3. **Verify each requirement (Opus)** — Spawn a code-reviewer agent on opus. For each requirement: search codebase for implementation, read code, check acceptance criteria, run tests. Report each as PASS, FAIL, or PARTIAL with evidence.
+3. **Verify each requirement (Opus)** — Verification is inherently an advisory task. Spawn a code-reviewer agent on Opus. For each requirement: search codebase for implementation, read code, check acceptance criteria, run tests. Report each as PASS, FAIL, or PARTIAL with evidence.
 
 4. **Present results** — Show pass/partial/fail counts and details.
 

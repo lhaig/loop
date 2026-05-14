@@ -1,1 +1,4 @@
 .DS_Store
+
+# Per-skill machine-local Claude settings created when a skill dir is used as cwd
+**/.claude/

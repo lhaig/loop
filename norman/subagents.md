@@ -3,6 +3,15 @@
 This file is read by the Haiku classifier during Step 3 of Mode 4 (Continue).
 The orchestrator does NOT need this in its main context.
 
+**Source of truth:** Available agents live in `~/.claude/agents/` (78 installed as of 2026-05-14). This file is a curated guide over that directory — if you add or remove an agent there, update the tables below. Haiku is instructed to verify the chosen `subagent_type` against the directory before returning a classification.
+
+To regenerate an authoritative list of installed agent names:
+```
+for f in ~/.claude/agents/*.md; do grep -m1 "^name:" "$f" | sed 's/name: *//'; done | sort -u
+```
+
+**Built-in agents** (always available, not files): `general-purpose`, `Explore`, `Plan`, `claude`, `statusline-setup`, `claude-code-guide`.
+
 ---
 
 ## Advisor Pattern
@@ -26,48 +35,116 @@ Use when the task is primarily in one language.
 
 | Language | subagent_type |
 |----------|---------------|
+| C / embedded | `c-pro` |
+| C++ | `cpp-pro` |
+| C# | `csharp-pro` |
+| Elixir | `elixir-pro` |
 | Go | `golang-pro` |
-| TypeScript | `typescript-pro` |
-| JavaScript | `javascript-pro` |
-| Python | `python-pro` |
-| Rust | `rust-pro` |
 | Java | `java-pro` |
+| JavaScript | `javascript-pro` |
+| PHP | `php-pro` |
+| Python | `python-pro` |
+| Ruby / Rails | `ruby-pro` |
+| Rust | `rust-pro` |
+| Scala | `scala-pro` |
 | SQL | `sql-pro` |
+| TypeScript | `typescript-pro` |
 
-### Framework Specialists
-Use when the task targets a specific framework.
+### Framework / Platform Specialists
+Use when the task targets a specific framework or platform.
 
-| Framework | subagent_type |
-|-----------|---------------|
-| Flutter/Dart | `flutter-expert` |
+| Framework / Platform | subagent_type |
+|----------------------|---------------|
+| Flutter / Dart | `flutter-expert` |
+| Frontend (React / responsive UI) | `frontend-developer` |
+| Godot 4 | `godot-developer` |
+| GraphQL APIs | `graphql-architect` |
+| iOS native | `ios-developer` |
+| Minecraft / Bukkit plugins | `minecraft-bukkit-pro` |
+| Mobile (React Native / cross-platform) | `mobile-developer` |
 | Serverpod | `serverpod-expert` |
-| React Native/Flutter | `mobile-developer` |
-| Terraform/IaC | `terraform-specialist` |
+| Unity | `unity-developer` |
 
-### Domain Specialists
+### Infrastructure / DevOps Specialists
+
+| Domain | subagent_type |
+|--------|---------------|
+| Cloud architecture (general) | `cloud-architect` |
+| Hybrid cloud | `hybrid-cloud-architect` |
+| Kubernetes architecture | `kubernetes-architect` |
+| CI/CD / Docker / deployment | `deployment-engineer` |
+| DevOps troubleshooting | `devops-troubleshooter` |
+| Incident response | `incident-responder` |
+| Network engineering | `network-engineer` |
+| Terraform / IaC | `terraform-specialist` |
+
+### Code Domain Specialists
 Use when the task domain matters more than the language.
 
 | Domain | subagent_type |
 |--------|---------------|
-| Testing | `test-automator` |
-| Security/auth | `security-auditor` |
-| Debugging | `debugger` |
-| Log/error analysis | `error-detective` |
 | API design | `backend-architect` |
 | Architecture review | `architect-reviewer` |
 | Code review | `code-reviewer` |
-| CI/CD/Docker | `deployment-engineer` |
-| Payments/billing | `payment-integration` |
-| Legacy refactoring | `legacy-modernizer` |
-| UI components | `frontend-design` |
-| UX/design | `ui-ux-designer` |
+| Database operations / migrations | `database-admin` |
+| Database query optimization | `database-optimizer` |
+| Debugging non-obvious issues | `debugger` |
+| Developer experience tooling | `dx-optimizer` |
+| Error / log analysis | `error-detective` |
+| Legacy refactoring / modernization | `legacy-modernizer` |
+| Payments / billing | `payment-integration` |
+| Performance / profiling | `performance-engineer` |
+| Prompt / agent engineering | `prompt-engineer` |
+| Search / RAG | `search-specialist` |
+| Security / auth | `security-auditor` |
+| Testing | `test-automator` |
+| UI / UX design | `ui-ux-designer` |
+| UI visual validation (screenshots) | `ui-visual-validator` |
 
-### General Purpose
+### Data / AI Specialists
+
+| Domain | subagent_type |
+|--------|---------------|
+| AI feature engineering | `ai-engineer` |
+| Context management for long workflows | `context-manager` |
+| Data engineering / pipelines | `data-engineer` |
+| Data science / analytics | `data-scientist` |
+| ML model training | `ml-engineer` |
+| MLOps | `mlops-engineer` |
+| Quant analysis | `quant-analyst` |
+
+### Documentation Specialists
+
+| Domain | subagent_type |
+|--------|---------------|
+| API documentation | `api-documenter` |
+| Long-form technical docs | `docs-architect` |
+| Mermaid diagrams | `mermaid-expert` |
+| Reference material | `reference-builder` |
+| Tutorials / guides | `tutorial-engineer` |
+
+### Non-Code Specialists
+Rare in Norman's project-execution flow, but available.
+
+| Domain | subagent_type |
+|--------|---------------|
+| Business analysis | `business-analyst` |
+| Content marketing | `content-marketer` |
+| Customer support | `customer-support` |
+| HR / people ops | `hr-pro` |
+| Legal review | `legal-advisor` |
+| Risk management | `risk-manager` |
+| Sales automation | `sales-automator` |
+| SEO content (auditor, writer, planner, etc.) | `seo-*` family |
+
+### General Purpose / Built-in
 
 | Use case | subagent_type |
 |----------|---------------|
 | No specialist match | `general-purpose` |
-| Context gathering (haiku) | `general-purpose` |
+| Context gathering / classification (Haiku) | `general-purpose` |
+| Read-only codebase search | `Explore` |
+| Implementation planning | `Plan` |
 
 ---
 
@@ -84,6 +161,8 @@ Return **high** if ANY of these apply:
 - Task requires debugging a non-obvious issue
 - Task modifies core infrastructure (database schemas, middleware, CI/CD)
 - Task involves payment processing or financial logic
+- Task is a performance investigation requiring profiling and tradeoff analysis
+- Task is an active incident or production outage
 
 Return **medium** if ANY of these apply:
 - Task touches 3-4 files
@@ -98,9 +177,20 @@ In `always` mode, the advisor reviews every task regardless of complexity. In `n
 ### Agent Selection
 
 Pick the **most specific** agent that matches:
-1. If the task is clearly in one language and that's the main challenge -> language specialist
-2. If the task targets a specific framework -> framework specialist
-3. If the task domain is more important than the language (e.g., writing tests, security audit) -> domain specialist
-4. If nothing fits well -> `general-purpose`
+1. If the task is clearly in one language and that's the main challenge → language specialist
+2. If the task targets a specific framework / platform → framework specialist
+3. If the task is infra/DevOps → infrastructure specialist
+4. If the task domain dominates the language (writing tests, security audit, perf work) → domain specialist
+5. If the task is data/AI/ML → data/AI specialist
+6. If the task is documentation → documentation specialist
+7. If nothing fits well → `general-purpose`
 
-All workers run on Sonnet. The agent type determines the specialist prompt, not the model.
+All workers run on Sonnet. The agent type determines the specialist prompt, not the model. The Opus advisor (Step 3.1, Step 6.2) handles complexity-based quality review separately — see Complexity Classification above.
+
+### Verification Step (required)
+
+Before returning a classification, verify the chosen `subagent_type` exists:
+- It must be either a built-in (listed above), OR
+- An agent with that `name:` in `~/.claude/agents/` (run the regeneration command above if unsure)
+
+If the agent does not exist, fall back to `general-purpose` and note the missing agent in your `CONTEXT` field so the orchestrator can flag it.

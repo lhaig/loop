@@ -56,7 +56,8 @@ Everything lives in `prds/` at the project root. One level only.
 
 ```
 prds/
-  TASKS.md           # Master task list — single source of truth for all task status
+  TASKS.md           # Master task list — single source of truth for ACTIVE/TODO/BLOCKED tasks
+  TASKS-archive.md   # Append-only archive of fully-completed phases (keeps TASKS.md short)
   config.md          # Project config, session limits, commands
   progress.md        # Append-only execution log (crash recovery)
   verification.md    # Verification results (created by norman verify)
@@ -66,7 +67,11 @@ prds/
   done/              # Completed PRDs
 ```
 
-**CRITICAL:** Task status lives ONLY in `prds/TASKS.md`. Norman does NOT maintain a separate task file.
+**CRITICAL:** Task status lives ONLY in `prds/TASKS.md` (active) and `prds/TASKS-archive.md` (collapsed phases). Norman does NOT maintain a separate task file.
+
+### TASKS.md context budget
+
+TASKS.md is read every session, so its size is a recurring context cost. Norman auto-collapses fully-DONE phases into a one-line summary and moves their full table to `TASKS-archive.md`. This keeps TASKS.md focused on what's left without losing history. Collapse only triggers when **every** task in a phase is `DONE` — phases with `PARTIAL`, `BLOCKED`, `ACTIVE`, or `TODO` tasks stay fully expanded.
 
 ### PRD Lifecycle
 
@@ -91,6 +96,14 @@ Norman manages PRD file moves to match task status:
 ```
 
 **Status values:** `TODO`, `ACTIVE`, `DONE (date)`, `BLOCKED`, `PARTIAL`
+
+**Collapsed phase format** (after every task in a phase is DONE):
+
+```markdown
+## Phase 2: Core API — 8 tasks completed 2026-05-10 (see [TASKS-archive.md](TASKS-archive.md))
+```
+
+The full table is appended to `TASKS-archive.md` under the same heading. Phase numbers are preserved so cross-references like "needs: 2.3" still resolve via the archive.
 
 ### config.md
 
@@ -172,11 +185,18 @@ Each story should be small enough to implement in one focused session.
 **Description:** As a [user], I want [feature] so that [benefit].
 
 **Acceptance Criteria:**
-- [ ] Specific verifiable criterion
-- [ ] Another criterion
+- [ ] Given [precondition], when [action], then [observable outcome]
+- [ ] Or: [concrete input/state] produces [concrete output/state]
 ```
 
-**Important:** Acceptance criteria must be verifiable. "Works correctly" is bad. "Button shows confirmation dialog before deleting" is good.
+**Important:** Each criterion must be directly translatable into a test assertion — concrete enough that the worker can write a failing test for it *before* writing any implementation code (see tests-first directive in Mode 4, Step 5).
+
+- Bad: "Works correctly", "Handles errors gracefully", "Performs well"
+- OK: "Button shows confirmation dialog before deleting"
+- Good: "Clicking Delete on a record with id=42 opens a modal containing the text 'Delete record 42?' with Confirm and Cancel buttons"
+- Good: "POST /users with `{email: 'x@y.com', age: -1}` returns 400 with body `{error: 'age must be >= 0'}`"
+
+When in doubt, ask yourself: "Could a junior developer read this and write a passing test without further clarification?" If not, make it more concrete.
 
 #### 4. Functional Requirements
 Numbered list: "FR-1: The system must..."
@@ -318,12 +338,18 @@ If no tasks are ready: report completion or what's blocking.
 
 ### Step 3: Classify and Prepare (Haiku)
 
-Spawn a Haiku agent to classify each ready task. It should:
-1. Search the codebase for relevant files (Glob/Grep)
-2. Read the most relevant files (max 5)
-3. Return: `SUBAGENT: [agent type]`, `FILES: [paths]`, `CONTEXT: [summary]`, `COMPLEXITY: [low|medium|high]`
+Spawn a Haiku agent to classify each ready task. The spawn prompt MUST include the absolute path to the classification guide so Haiku reads it explicitly:
 
-Use the classification guide in `subagents.md`. Classify multiple ready tasks in parallel.
+> Read `/Users/stokvis/.claude/skills/norman/subagents.md` for the classification guide. Then verify the agent you choose exists by checking `ls ~/.claude/agents/` (or confirm it is a built-in: `general-purpose`, `Explore`, `Plan`). Do NOT return an agent name that is not present in either source.
+
+Haiku should:
+1. Read the classification guide at the path above
+2. Search the codebase for relevant files (Glob/Grep)
+3. Read the most relevant files (max 5)
+4. Verify the chosen `subagent_type` is installed
+5. Return: `SUBAGENT: [agent type]`, `FILES: [paths]`, `CONTEXT: [summary]`, `COMPLEXITY: [low|medium|high]`
+
+Classify multiple ready tasks in parallel.
 
 ### Step 3.1: Advisor Plan Review (Opus)
 
@@ -368,35 +394,45 @@ Use Agent tool with subagent type from Step 3 and model `sonnet`. The prompt MUS
 - **Relevant files** and **current state** from Step 3
 - **Patterns & learnings** from progress.md
 - **Project commands** for build/lint/test
+- **Tests-first directive:** Write a failing test that encodes the acceptance criteria BEFORE writing implementation code. Then implement until the test goes green. Exception: tasks explicitly tagged `(spike)` in TASKS.md skip this — they prototype first and a follow-up task adds tests.
 - Instructions to report: DONE/FAILED/BLOCKED, files changed, summary, and any `PATTERN: [category] - [description]` discoveries
+- **Required evidence in DONE report:** path(s) to the test file(s) added or modified, and the final test command output showing the relevant tests pass. Reports missing this evidence will be rejected (treated as FAILED).
 - Rules: do NOT commit, do NOT modify `prds/` files
 
 Spawn multiple independent workers in parallel if multiple tasks are ready.
 
 ### Step 6: Process Result
 
-**DONE — Step 6.1: Advisor Code Review (Opus)**
+**DONE — Step 6.1: Verify Test Evidence**
+
+Confirm the report includes a test file path and passing test output for the acceptance criteria. If missing (and the task is not `(spike)`-tagged), treat as FAILED and re-spawn with an explicit reminder of the tests-first directive. Do NOT proceed to advisor review or commit without tests.
+
+**Step 6.2: Advisor Code Review (Opus)**
 
 **When `advisor_mode` is `always`:** Spawn an Opus code-reviewer agent for every completed task.
 **When `advisor_mode` is `auto`:** Only spawn if the task was classified as `COMPLEXITY: high` or `medium`.
-**When `advisor_mode` is `never`:** Skip to Step 6.2.
+**When `advisor_mode` is `never`:** Skip to Step 6.3.
 
 The Opus reviewer receives: the task description, acceptance criteria, advisor's original APPROACH from Step 3.1, and the worker's reported file changes. It reads the changed files and returns:
 - **QUALITY:** `PASS`, `MINOR`, or `REJECT`
 - **ISSUES:** List of specific problems (if any), each with file path and description
 - **PATTERNS:** Any broadly useful patterns discovered
 
-`PASS` — Proceed to commit (Step 6.2).
+`PASS` — Proceed to commit (Step 6.3).
 `MINOR` — Log issues in progress.md as improvement notes, proceed to commit. These are suggestions, not blockers.
 `REJECT` — Do NOT commit. Re-spawn the Sonnet worker with the reviewer's specific issues as fix instructions. After the second attempt, run the reviewer again. If rejected twice, mark BLOCKED and ask the user.
 
-**Step 6.2: Commit**
+**Step 6.3: Commit**
 
 1. Move PRD from `prds/active/` to `prds/done/` using git mv
 2. Update TASKS.md row: status -> `DONE (date)`, PRD link -> `done/`, add summary note
-3. Append to `prds/progress.md` (date, task, changes, patterns, advisor review result)
-4. Commit with `feat([scope]): [description]`
-5. If subagent or advisor reported broadly useful patterns, offer to promote to CLAUDE.md
+3. **Auto-collapse phase if fully DONE** — After updating the row, check whether every task in the current phase is now `DONE`. If so:
+   - Append the full phase heading + table to `prds/TASKS-archive.md` (create file if missing)
+   - Replace the phase block in TASKS.md with a one-line summary: `## Phase N: [Name] — X tasks completed YYYY-MM-DD (see [TASKS-archive.md](TASKS-archive.md))`
+   - Skip if any task is `PARTIAL`, `BLOCKED`, `ACTIVE`, or `TODO`
+4. Append to `prds/progress.md` (date, task, changes, patterns, advisor review result)
+5. Commit with `feat([scope]): [description]` (include the archive update in the same commit if a phase was collapsed)
+6. If subagent or advisor reported broadly useful patterns, offer to promote to CLAUDE.md
 
 **FAILED — Advisor-Guided Recovery:**
 
@@ -443,7 +479,29 @@ Save verification report to `prds/verification.md` and commit.
 
 ---
 
-## Mode 6: Reset
+## Mode 6: Prune
+
+Start with: "norman prune"
+
+Manual trigger for the same phase-collapse logic that runs automatically on task completion. Use when:
+- Auto-collapse was skipped because of a stale `BLOCKED` or `PARTIAL` row that should now be re-classified
+- TASKS.md was edited by hand and accumulated fully-DONE phases
+- Migrating an existing project to the archive format
+
+### Process
+
+1. Scan `prds/TASKS.md` for phases where every task is `DONE`.
+2. List them and ask the user to confirm which to collapse (default: all).
+3. For each confirmed phase:
+   - Append full heading + table to `prds/TASKS-archive.md`
+   - Replace the phase block in TASKS.md with the one-line summary
+4. Commit with `chore: prune completed phases from TASKS.md`.
+
+If TASKS.md has no fully-DONE phases, report that and exit.
+
+---
+
+## Mode 7: Reset
 
 Start with: "norman reset"
 
@@ -468,6 +526,7 @@ Check current state (incomplete tasks, uncommitted changes), then offer:
 | `norman add [desc]` | Add new task to TASKS.md |
 | `norman pause` | Stop after current task |
 | `norman verify` | Verify implementation against PRD/requirements |
+| `norman prune` | Collapse fully-DONE phases into TASKS-archive.md |
 | `norman reset` | Clear execution state and start fresh |
 | `norman learnings` | Review and promote patterns to CLAUDE.md |
 
@@ -488,7 +547,7 @@ Check current state (incomplete tasks, uncommitted changes), then offer:
 
 Every task runs in a subagent for fresh context and isolation. The orchestrator reads/updates `prds/` files, spawns subagents, processes results, and commits. Workers implement tasks and report results but do NOT commit or modify `prds/` files.
 
-**Specialized agents:** The full list of 25+ agent types with classification guidance is in `subagents.md` (same directory as this file).
+**Specialized agents:** The full list of agent types with classification guidance is in `subagents.md` (same directory as this file). The list must be kept in sync with the actual contents of `~/.claude/agents/` — Haiku is instructed to verify chosen agents exist before returning them.
 
 **Parallel execution:** If multiple tasks are ready with no dependency conflicts, classify and execute in parallel.
 
